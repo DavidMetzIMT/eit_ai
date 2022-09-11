@@ -1,17 +1,17 @@
 
 
 import os
-from logging import getLogger
+import logging
 
 import numpy as np
 import tensorflow as tf
 from eit_ai.train_utils.dataset import (AiDatasetHandler, StdAiDatasetHandler,
-                                          scale_prepocess)
+                                          scale_preprocess)
 from eit_ai.train_utils.metadata import MetaData
 from eit_ai.train_utils.lists import ListKerasDatasetHandlers
 from sklearn.preprocessing import MinMaxScaler
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 ################################################################################
 # Dataset for Keras Model using the tf.data.Dataset class

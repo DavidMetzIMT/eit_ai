@@ -2,7 +2,8 @@
 
 import random
 from enum import Enum, auto
-from logging import getLogger
+import logging
+from statistics import median
 from typing import Any, Union
 
 import matplotlib.pyplot as plt
@@ -14,7 +15,8 @@ from scipy.io import loadmat
 
 from eit_ai.eval_utils import EvalResults, ImageDataset, ImageEIT
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
+logging.getLogger("matplotlib.font_manager").disabled = True
 
 def get_elem_nodal_data(fwd_model, perm, compute:bool=False):
     """ check mesh (tri, pts) in fwd_model and provide elems_data and nodes_data """
@@ -45,10 +47,10 @@ def format_inputs(fwd_model, data):
     if data.ndim==2:
         tri = np.array(fwd_model['elems'])
         pts = np.array(fwd_model['nodes'])
-        if data.shape[1]==pts.shape[0] or data.shape[1]==tri.shape[0]:
+        if data.shape[1] in [pts.shape[0], tri.shape[0]]:
             data= data.T
-    # if data.ndim==3:
-    #     data = np.reshape(data,(1, 256))
+    if data.ndim==3:
+        data = np.reshape(data,(1, 256))
     return data
 
 def plot_EIT_samples(fwd_model, perm, U):
@@ -58,47 +60,35 @@ def plot_EIT_samples(fwd_model, perm, U):
 
     tri, pts, data= get_elem_nodal_data(fwd_model, perm)
 
-    if perm.shape[0]==pts.shape[0]:
-        key= 'nodes_data'
-    else:
-        key= 'elems_data'
-
+    key = 'nodes_data' if perm.shape[0]==pts.shape[0] else 'elems_data'
     fig, ax = plt.subplots(1,2)
     im = ax[0].tripcolor(pts[:,0], pts[:,1], tri, np.real(data[key]),shading='flat', vmin=None,vmax=None)
-    title= key
+    title = key + ('\nNormalized conductivity distribution' if np.all(perm <= 1) else '\nConductivity distribution')
 
-    if np.all(perm <= 1):
-        title= title +'\nNormalized conductivity distribution'
-    else:
-        title= title +'\nConductivity distribution'
     ax[0].set_title(title)
     ax[0].set_xlabel("X axis")
     ax[0].set_ylabel("Y axis")
-        
+
     ax[0].axis("equal")
     fig.colorbar(im,ax=ax[0])
 
     ax[1].plot(U.T)
-    
+
     plt.show(block=False)
 
 def plot_real_NN_EIDORS(fwd_model, perm_real,*argv):
 
-    _perm= list()
-    _perm.append(perm_real)
-
+    _perm = [perm_real]
     for arg in argv:
         if _perm[0].shape==arg.shape:
             _perm.append(arg)
 
-    perm=list()
+    perm = []
     if perm_real.ndim > 1:
         n_row=  perm_real.shape[1]
-        for p in _perm:
-            perm.append(p)
+        perm.extend(iter(_perm))
     else:
-        for p in _perm:
-            perm.append(p.reshape((p.shape[0],1)))
+        perm.extend(p.reshape((p.shape[0],1)) for p in _perm)
         n_row= 1
     n_col = len(perm)
 
@@ -106,16 +96,16 @@ def plot_real_NN_EIDORS(fwd_model, perm_real,*argv):
     if ax.ndim==1:
         ax=ax.reshape((ax.shape[0],1)).T
 
+    key= 'elems_data'
     for row in range(ax.shape[0]):
 
         data= [dict() for _ in range(n_col)]
         for i, p in enumerate(perm):
             tri, pts, data[i]= get_elem_nodal_data(fwd_model, p[:, row])
-        key= 'elems_data'
         for col in range(n_col):
             print(row, col)
             im = ax[row, col].tripcolor(pts[:,0], pts[:,1], tri, np.real(data[col][key]),shading='flat', vmin=None,vmax=None)
-            title= key + f'#{row}'
+            title = f'{key}#{row}'
 
             # if np.all(perm <= 1):
             #     title= title +'\nNormalized conductivity distribution'
@@ -124,7 +114,7 @@ def plot_real_NN_EIDORS(fwd_model, perm_real,*argv):
             ax[row, col].set_title(title)
             ax[row, col].set_xlabel("X axis")
             ax[row, col].set_ylabel("Y axis")
-                
+
             ax[row, col].axis("equal")
             fig.colorbar(im,ax=ax[row, col])
 
@@ -146,7 +136,7 @@ def plot_compare_samples(
     
     idx_list= generate_nb_samples2plot(image_data, nb_samples, rand)
     logger.debug(f'{idx_list=}, {idx_list.__len__()=}')
-    img2plot= [ImageDataset(id.data[idx_list,:], id.label, id.fwd_model) for id in image_data]
+    img2plot= [ImageDataset(id.data[idx_list,:], id.label, id.fwd_model, id.sim) for id in image_data]
 
     n_img= len(img2plot)
     n_samples= len(idx_list)
@@ -235,13 +225,13 @@ def generate_nb_samples2plot(
     """ """
     nb_samples_total=image_data[0].data.shape[0]
     if nb_samples_total==0:
-        logger.error(f'image data do not contain any data!!!!)')
+        logger.error('image data do not contain any data!!!!)')
         return None
 
     if isinstance(nb_samples, list):
         if max(nb_samples)>nb_samples_total:
             logger.error(f'List of indexes : {nb_samples} is not correc')
-            logger.info(f'first image will be plot')
+            logger.info('first image will be plot')
             return [0]
         return nb_samples
     elif isinstance(nb_samples, int):
@@ -263,20 +253,27 @@ def plot_eval_results(results:list[EvalResults], axis='linear', plot_type=None):
     n_set= len(results)
     n_indic= len(results[0].indicators.keys())
 
-    fig1, ax = plt.subplots(2,n_indic)
+    fig, ax = plt.subplots(1,n_indic)
 
     for indx, indic in enumerate(results[0].indicators.keys()):
 
-        ax[0,indx].set_title(indic)
+        ax[indx].set_title(indic)
         tmp= []
         labels=[]
         for res in results:
             tmp.append(np.reshape(res.indicators[indic], (len(res.indicators[indic]),)))
             labels.append(res.info)
+        bp = ax[indx].boxplot(tmp, labels=labels, showmeans=True)
         
-        ax[0,indx].boxplot(tmp, labels=labels)
-        ax[1,indx].plot(np.array(tmp).T, label=labels)
-        ax[1,indx].legend()
+        # means = [round(item.get_ydata()[0], 3) for item in bp['means']]
+        # medians = [round(item.get_ydata()[0], 3) for item in bp['medians']]
+        
+        # for i, line in enumerate(bp['medians']):
+        #     x, y = line.get_xydata()[1]
+        #     text = ' mean={:.3f}\n med={:.3f}'.format(means[0], medians[0])
+        #     ax[indx].annotate(text, xy=(x, y))
+        # ax[1,indx].plot(np.array(tmp).T, label=labels)
+        # ax[1,indx].legend()
     
     plt.show(block=False)
     

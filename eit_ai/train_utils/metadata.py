@@ -2,25 +2,29 @@ from enum import Enum
 import os
 import sys
 from dataclasses import dataclass
-from logging import error, getLogger
+import logging
 from typing import Union
 
 from eit_ai.default.set_default_dir import AI_DIRS, AiDirs, set_ai_default_dir
 from eit_ai.train_utils.lists import (ListDatasetHandlers, ListModels, ListWorkspaces, ListLosses,
                                       ListModelHandlers, ListOptimizers,ListNormalizations)
-from glob_utils.files.files import (FileExt, find_file, is_file, read_txt,
-                                    save_as_mat, save_as_pickle, save_as_txt, )
+from glob_utils.file.utils import FileExt, find_file, is_file
+from glob_utils.file.json_utils import read_json, save_to_json
+from glob_utils.file.pkl_utils import save_as_pickle
+from glob_utils.file.mat_utils import save_as_mat
+import glob_utils.types.dict
+                                   
 from glob_utils.log.msg_trans import highlight_msg
-from glob_utils.pth.path_utils import (OpenDialogDirCancelledException,
+from glob_utils.directory.utils import (OpenDialogDirCancelledException,
                                        get_datetime_s, get_dir, get_POSIX_path,
                                        mk_new_dir)
 
-# from glob_utils.pth.inout_dir import DEFAULT_DIRS
+# from glob_utils.directory.inout_dir import DEFAULT_DIRS
 
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
-METADATA_FILENAME= f'metadata{FileExt.txt}'
+METADATA_FILENAME= f'metadata{FileExt.json}'
 IDX_FILENAME= 'idx_samples'
 
 ################################################################################
@@ -152,7 +156,7 @@ class MetaData(object):
             save_summary:bool=False)-> None:
         """ """
         if not self.batch_size:
-            error('call first set_4_dataset')
+            logging.error('call first set_4_dataset')
 
         self.epoch= epoch
         self.max_trials_autokeras=max_trials_autokeras
@@ -201,7 +205,7 @@ class MetaData(object):
         path =  os.path.join(self.dir_path, f'{IDX_FILENAME}_{time}')
         save_as_mat(path, indexes)
         save_as_pickle(path, indexes)
-        save_as_txt(path,indexes)
+        save_to_json(path,indexes)
         self.set_idx_samples_file(path)
 
     def set_training_duration(self, duration:str=''):
@@ -230,13 +234,15 @@ class MetaData(object):
                 setattr(copy, key, l)
             else:
                 setattr(copy, key, val)
-        save_as_txt(filename, copy)
+                
+        copy = glob_utils.types.dict.dict_nested(copy,ignore_private=False)
+        save_to_json(filename, copy)
         logger.info(highlight_msg(f'Metadata saved in: {filename}'))
         
         
     def read(self, path):
         
-        load_dict=read_txt(path)
+        load_dict=read_json(path)
         for key in load_dict.keys():
             if key in self.__dict__.keys():
                 setattr(self,key, load_dict[key])
@@ -246,6 +252,7 @@ class MetaData(object):
         logger.debug(f'Metadata loaded (details):\n{self.__dict__}')
         self.dir_path=os.path.split(path)[0]
         self.check_raw_src_file()
+        
         
 
     def check_raw_src_file(self)->None:
@@ -330,7 +337,7 @@ if __name__ == "__main__":
 
     x = {}
     y = {'b': 10, 'c': 11}
-    print({**x, **y})
+    print(x | y)
 
     
 

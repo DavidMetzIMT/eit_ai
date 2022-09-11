@@ -1,8 +1,8 @@
 
-from logging import getLogger
+import logging
 
 import numpy as np
-from eit_ai.keras.dataset import KERAS_DATASET_HANDLERS
+from eit_ai.keras.dataset import KERAS_DATASET_HANDLERS, KerasDatasetHandler
 from eit_ai.keras.models import KERAS_MODEL_HANDLERS, KERAS_MODELS
 from eit_ai.raw_data.raw_samples import RawSamples
 from eit_ai.train_utils.dataset import AiDatasetHandler
@@ -13,7 +13,7 @@ from eit_ai.train_utils.lists import (ListKerasModels, ListWorkspaces, ListKeras
 from eit_ai.train_utils.metadata import MetaData
 from glob_utils.args.kwargs import kwargs_extract
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 ################################################################################
 # Keras Models
@@ -24,9 +24,9 @@ class KerasWorkspace(AiWorkspace):
 
     def select_model_dataset(
         self, 
-        model_handler:ListKerasModelHandlers=None, 
-        dataset_handler:ListKerasDatasetHandlers=None,
-        model:ListKerasModels=None,
+        model_handler:ListKerasModelHandlers=ListKerasModelHandlers.KerasModelHandler, 
+        dataset_handler:ListKerasDatasetHandlers=ListKerasDatasetHandlers.KerasDatasetHandler,
+        model:ListKerasModels=ListKerasModels.StdKerasModel,
         metadata:MetaData=None)-> None:
         
         if model_handler is None and dataset_handler is None and model is None:

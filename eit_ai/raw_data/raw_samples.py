@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from logging import getLogger
+import logging
 
 from eit_ai.train_utils.metadata import MetaData
 
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 ################################################################################
@@ -20,6 +20,8 @@ class RawSamples(ABC):
         self.dataset = {}
         self.fwd_model= {}
         self.user_entry = {}
+        self.setup = {}
+        self.sim = {}
         self.samples = {}
         self.X= []
         self.Y=[]
@@ -45,6 +47,8 @@ class RawSamples(ABC):
         self.dataset
         self.fwd_model
         self.user_entry
+        self.sim
+        self.setup
         self.samples
         self.X: ArrayLike(n_samples, n_features)
         self.Y: ArrayLike(n_samples, n_labels)

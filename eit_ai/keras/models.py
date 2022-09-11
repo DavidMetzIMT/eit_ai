@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 import os
 from contextlib import redirect_stdout
-from logging import error, getLogger
+import logging
 from typing import Any
 
 import autokeras as ak
@@ -23,7 +23,7 @@ from eit_ai.train_utils.models import (MODEL_SUMMARY_FILENAME,
                                        WrongMetricsError, WrongOptimizerError)
 from genericpath import isdir
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 
@@ -71,12 +71,31 @@ class StdKerasModel(TypicalKerasModelGenerator):
         self.model = keras.models.Sequential()
         self.model.add(keras.layers.Dense(in_size, input_dim = in_size))
         self.model.add(keras.layers.Activation(tf.nn.relu))
-        self.model.add(keras.layers.Dense(512))
+        self.model.add(keras.layers.Dense(1024))
         self.model.add(keras.layers.Activation(tf.nn.relu))
-        self.model.add(keras.layers.Dense(512))
+        self.model.add(keras.layers.Dense(128))
+        self.model.add(keras.layers.Activation(tf.nn.relu))
+        self.model.add(keras.layers.Dense(1024))
         self.model.add(keras.layers.Activation(tf.nn.relu))
         self.model.add(keras.layers.Dense(out_size)) 
         self.model.add(keras.layers.Activation(tf.nn.sigmoid))
+
+class StdAutokerasModel(TypicalKerasModelGenerator):
+    """Define a Standard
+    """
+    def _set_layers(self, metadata:MetaData)->None:
+        self.name = "std_autokeras"
+        self.model = ak.StructuredDataRegressor(
+            max_trials = metadata.max_trials_autokeras, 
+            overwrite=True, 
+            directory=metadata.dir_path)
+
+    def _set_layers(self, metadata:MetaData)->None:
+        self.name = "std_autokeras"
+        self.model = ak.StructuredDataRegressor(
+            max_trials = metadata.max_trials_autokeras, 
+            overwrite=True, 
+            directory=metadata.dir_path)
 
 
 ################################################################################
@@ -143,11 +162,12 @@ class StdKerasModelHandler(AiModelHandler):
 ################################################################################
 class StdAutokerasModelHandler(AiModelHandler):
     def _define_model(self, metadata:MetaData)-> None:
-        self.name = "std_autokeras"
-        self.model = ak.StructuredDataRegressor(
-            max_trials = metadata.max_trials_autokeras, 
-            overwrite=True, 
-            directory=metadata.dir_path)
+        gen_cls = get_from_dict(
+            metadata.model_type, KERAS_MODELS, ListKerasModels
+        )
+        gen=gen_cls(metadata)
+        self.model=gen.get_model()
+        self.name =gen.get_name()
     def _get_specific_var(self, metadata:MetaData)-> None:
         """"""
     def _prepare_model(self)-> None:
@@ -299,7 +319,8 @@ KERAS_MODEL_HANDLERS={
 }
 
 KERAS_MODELS={
-    ListKerasModels.StdKerasModel: StdKerasModel
+    ListKerasModels.StdKerasModel: StdKerasModel,
+    ListKerasModels.StdAutokerasModel: StdAutokerasModel,
 }
 
 if __name__ == "__main__":

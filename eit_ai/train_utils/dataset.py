@@ -1,7 +1,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from logging import getLogger
+import logging
 from typing import Any, Union
 
 import numpy as np
@@ -10,9 +10,9 @@ from eit_ai.raw_data.raw_samples import RawSamples
 from eit_ai.train_utils.lists import ListNormalizations, get_from_dict
 from eit_ai.train_utils.metadata import MetaData
 from scipy.stats import zscore
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MaxAbsScaler, MinMaxScaler
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 ################################################################################
 # Custom Exeptions/Errors for Dataset
 ################################################################################
@@ -44,6 +44,7 @@ class AiDatasetHandler(ABC):
         self.ouput_size:int= 0
         
         self.fwd_model:dict={}
+        self.sim:dict={}
         
         self._post_init()
 
@@ -63,6 +64,7 @@ class AiDatasetHandler(ABC):
         X=raw_samples.X
         Y=raw_samples.Y
         self.fwd_model= raw_samples.fwd_model
+        self.sim= raw_samples.sim
         metadata._nb_samples= raw_samples.nb_samples
 
         self._set_sizes_dataset(X, Y, metadata)
@@ -87,22 +89,31 @@ class AiDatasetHandler(ABC):
             Y ([type]): [description]
             metadata (MetaData): [description]
         """ 
-        logger.debug(f'Size of X and Y: {X.shape=}, {Y.shape=}')       
-        self._nb_samples= np.shape(X)[0]
-        if metadata._nb_samples != self._nb_samples:
-            raise TypeError(f'wrong shape {X=}, {X.shape=}; {Y=}, {Y.shape=}')
         self._batch_size = metadata.batch_size
         self._test_ratio= metadata.test_ratio
         self._val_ratio = metadata.val_ratio
-        self.input_size= np.shape(X)[1]
-        self.ouput_size= np.shape(Y)[1]
+        
 
     def _compute_sizes(self):
-        self._train_len=self.get_X('train').shape[0]
-        self._val_len=self.get_X('val').shape[0]
-        self._test_len= self.get_X('test').shape[0]
+        
+        # logger.debug(f'Size of X and Y: {X.shape=}, {Y.shape=}')       
+        # if metadata._nb_samples != self._nb_samples:
+        #     raise TypeError(f'wrong shape {X=}, {X.shape=}; {Y=}, {Y.shape=}')
+        
+        # self.input_size= self.get_X('train').shape[1]
+        self.input_size, self.ouput_size= self.train.get_inout_sizes()
+        # self.ouput_size= self.get_Y('train').shape[1]
+        
+        self._train_len=len(self.train)
+        self._val_len=len(self.val)
+        self._test_len= len(self.test)
+        self._nb_samples= self._train_len + self._val_len + self._test_len
+        
+        logger.info(f'{self._nb_samples=}')
+        logger.info(f'{self.ouput_size=}')
+        logger.info(f'{self.input_size=}')
         logger.info(f'Length of train: {self._train_len}')
-        logger.info(f'Length of val: {self._val_len}' )
+        logger.info(f'Length of val: {self._val_len}')
         logger.info(f'Length of test: {self._test_len}')
 
     def _is_indexes(self, metadata:MetaData):
@@ -113,8 +124,8 @@ class AiDatasetHandler(ABC):
 
         Returns:
             [type]: [description]
-        """        
-        return metadata.idx_samples['idx_train']
+        """
+        return metadata.idx_samples is not None
     
     def format_single_X(self, single_X:np.ndarray, metadata:MetaData, preprocess:bool=False)->np.ndarray:
 
@@ -127,8 +138,12 @@ class AiDatasetHandler(ABC):
         formated_X= np.reshape(formated_X,(1, self.input_size))
         logger.debug(f'{formated_X=}, {formated_X.shape=}')
         if not preprocess:
+            if metadata.model_type == 'Conv1dNet':
+                formated_X= np.reshape(formated_X,(-1, 1, self.input_size))
             return formated_X
         prepro_X= self._preprocess(formated_X, None, metadata)[0]
+        if metadata.model_type == 'Conv1dNet':
+            prepro_X= np.reshape(prepro_X,(-1, 1, self.input_size))
         logger.debug(f'{prepro_X=}, {prepro_X.shape=}')
         return prepro_X
 
@@ -171,7 +186,17 @@ class AiDataset(ABC):
     should contain x and y of the dataset
     also the creator should be AiDataset(x, y)
     """    
+    
+    
 
+    @abstractmethod
+    def __len__(self):
+        """"""
+        
+    @abstractmethod
+    def get_inout_sizes(self):
+        """"""
+        
     @abstractmethod
     def get_set(self)->tuple[np.ndarray,np.ndarray]:
         """ Return the x and y of the dataset
@@ -193,9 +218,22 @@ class SimpleDataset(AiDataset):
         super().__init__()
         self._x=x
         self._y=y
+        
+    def __len__(self):
+        return len(self._x)
+    
+    def get_inout_size(self):
+        return self._x.shape[1], self._y.shape[1]
 
+    def __len__(self):
+        return len(self._x)
+    
+    def get_inout_sizes(self):
+        return self._x.shape[1], self._y.shape[1]
+    
     def get_set(self)->tuple[np.ndarray,np.ndarray]:
         return self._x, self._y
+    
     
 ################################################################################
 # Custom standard Datasethandler
@@ -223,8 +261,8 @@ class StdAiDatasetHandler(AiDatasetHandler):
         )->tuple[Union[np.ndarray,None],Union[np.ndarray,None]]:
         """return X, Y preprocessed"""
         if isinstance(metadata.normalize[0], bool):
-            X=scale_prepocess(X, metadata.normalize[0])
-            Y=scale_prepocess(Y, metadata.normalize[1])
+            X=scale_preprocess(X, metadata.normalize[0])
+            Y=scale_preprocess(Y, metadata.normalize[1])
         else:
             X= get_from_dict(
                 metadata.normalize[0],NORMALIZATIONS,ListNormalizations)(X)
@@ -243,8 +281,8 @@ class StdAiDatasetHandler(AiDatasetHandler):
         """build the dataset"""
         idx=np.reshape(range(X.shape[0]),(X.shape[0],1))
         X= np.concatenate(( X, idx ), axis=1)
-        x_tmp, x_test, y_tmp, y_test = sklearn.model_selection.train_test_split(X, Y,test_size=self._test_ratio)
-        x_train, x_val, y_train, y_val = sklearn.model_selection.train_test_split(x_tmp, y_tmp, test_size=self._val_ratio)
+        x_tmp, x_test, y_tmp, y_test = sklearn.model_selection.train_test_split(X, Y,test_size=self._test_ratio,random_state=42)
+        x_train, x_val, y_train, y_val = sklearn.model_selection.train_test_split(x_tmp, y_tmp, test_size=self._val_ratio,random_state=42)
         
         self._idx_train= x_train[:,-1].tolist()
         self._idx_val= x_val[:,-1].tolist()
@@ -273,7 +311,7 @@ def convert_to_int(x:Any)->int:
 
 convert_vec_to_int = np.vectorize(convert_to_int)
 
-def scale_prepocess(x:np.ndarray, scale:bool=True)->Union[np.ndarray,None]:
+def scale_preprocess(x:np.ndarray, scale:bool=True)->Union[np.ndarray,None]:
     """Normalize input x using minMaxScaler 
     Attention: if x.shape is (1,n) it wont work
 
@@ -288,13 +326,14 @@ def scale_prepocess(x:np.ndarray, scale:bool=True)->Union[np.ndarray,None]:
     """    
     if scale:
         scaler = MinMaxScaler()
+        # scaler = MaxAbsScaler()
         x= scaler.fit_transform(x.T).T if x is not None else None
         # logger.debug(f'{scaler.scale_=}, {scaler.scale_.shape=}')
     return x
 ################################################################################
 # Preprocessing methods
 ################################################################################
-def _prepocess_identity(x:np.ndarray)->np.ndarray:
+def _preprocess_identity(x:np.ndarray)->np.ndarray:
     """Preprocessing returning indentity of x  
     
     Args:
@@ -308,7 +347,7 @@ def _prepocess_identity(x:np.ndarray)->np.ndarray:
     x= preprocess_guard(x)
     return x if x.size > 0 else x
 
-def _prepocess_zscore(x:np.ndarray)->np.ndarray:
+def _preprocess_zscore(x:np.ndarray)->np.ndarray:
     """Preprocessing returning zscore of x  
 
     Args:
@@ -322,7 +361,7 @@ def _prepocess_zscore(x:np.ndarray)->np.ndarray:
     x= preprocess_guard(x)    
     return zscore(x, axis=1) if x.size > 0 else x
 
-def _prepocess_minmax_01(x:np.ndarray)->Union[np.ndarray,None]:
+def _preprocess_minmax_01(x:np.ndarray)->Union[np.ndarray,None]:
     """Preprocessing returning MinMax of x with scaling range [0,1]
 
     Args:
@@ -341,8 +380,8 @@ def _prepocess_minmax_01(x:np.ndarray)->Union[np.ndarray,None]:
     logger.debug(f'{scaler.scale_=}, {scaler.scale_.shape=}')
     return x
 
-def _prepocess_minmax_11(x:np.ndarray)->np.ndarray:
-    """Preprocessing returning MinMax of x wth scaling range [-1,1]
+def _preprocess_minmax_11(x:np.ndarray)->np.ndarray:
+    """Preprocessing returning MinMax of x with scaling range [-1,1]
 
     Args:
         x (np.ndarray): array-like of shape (n_samples, n_features)
@@ -381,10 +420,10 @@ def preprocess_guard(x:np.ndarray)->np.ndarray:
     return x
 
 NORMALIZATIONS={
-    ListNormalizations.Identity:_prepocess_identity,
-    ListNormalizations.MinMax_01:_prepocess_minmax_01,
-    ListNormalizations.MinMax_11:_prepocess_minmax_11,
-    ListNormalizations.Norm:_prepocess_zscore
+    ListNormalizations.Identity:_preprocess_identity,
+    ListNormalizations.MinMax_01:_preprocess_minmax_01,
+    ListNormalizations.MinMax_11:_preprocess_minmax_11,
+    ListNormalizations.Norm:_preprocess_zscore
 }
 
 
@@ -409,18 +448,17 @@ if __name__ == "__main__":
     print(scaler.transform([[2, 2]]))
 
     rge=4
-    x= np.array(
-        [[random.random()*(row+1)+2 for col in range(100)] for row in range(rge)]
-    )
+    x = np.array([[random.random() * (row + 1) + 2 for _ in range(100)] for row in range(rge)])
+
     print(f'{x=}, {x.shape=}')
 
     for idx in range(rge):
         plt.figure()
         plt.plot(x[idx], label='x')
         # plt.plot(_prepocess_identity(x)[idx],label='ident(x)')
-        plt.plot(_prepocess_minmax_11(x)[idx],label='mm-11(x)')
-        plt.plot(_prepocess_minmax_01(x)[idx],label='mm01(x)')
-        plt.plot(_prepocess_zscore(x)[idx],label='zscore(x)')
+        plt.plot(_preprocess_minmax_11(x)[idx],label='mm-11(x)')
+        plt.plot(_preprocess_minmax_01(x)[idx],label='mm01(x)')
+        plt.plot(_preprocess_zscore(x)[idx],label='zscore(x)')
 
 
 
@@ -428,9 +466,9 @@ if __name__ == "__main__":
         plt.figure()
         plt.boxplot([
             x[idx],
-            _prepocess_minmax_11(x)[idx],
-            _prepocess_minmax_01(x)[idx],
-            _prepocess_zscore(x)[idx]],labels=['x','mm-11(x)','mm01(x)','zscore(x)'])
+            _preprocess_minmax_11(x)[idx],
+            _preprocess_minmax_01(x)[idx],
+            _preprocess_zscore(x)[idx]],labels=['x','mm-11(x)','mm01(x)','zscore(x)'])
         plt.legend()
         # plt.show(block=False)
     change_level_logging(logging.INFO)
